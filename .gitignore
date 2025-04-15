@@ -1,0 +1,11 @@
+./kms
+./output
+*.ipynb
+*.zip
+*.snappy
+*.parquet
+*.json
+*.csv
+*.txt
+*.html
+*.md
