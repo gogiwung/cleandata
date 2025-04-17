@@ -5,6 +5,7 @@ import shutil
 from datetime import datetime
 import webbrowser
 import re
+import tiktoken
 
 def cleanup_output():
     """output 디렉토리 초기화"""
@@ -81,25 +82,52 @@ def process_table(table):
     
     return "\n".join(markdown_rows)
 
+# def html_to_rag_text(html_content):
+#     """HTML을 RAG에 적합한 텍스트로 변환"""
+#     soup = BeautifulSoup(html_content, 'html.parser')
+#     elements = []
+    
+#     # 제목 추출
+#     title = soup.find(['h1', 'h2', 'h3'])
+#     if title:
+#         elements.append(('title', get_text_content(title)))
+    
+#     # 본문 내용 추출
+#     for element in soup.find_all(['p', 'div', 'table']):
+#         if element.name == 'table':
+#             elements.append(('table', process_table(element)))
+#         else:
+#             text = get_text_content(element)
+#             if text:
+#                 elements.append(('text', text))
+    
+#     return elements
 def html_to_rag_text(html_content):
-    """HTML을 RAG에 적합한 텍스트로 변환"""
     soup = BeautifulSoup(html_content, 'html.parser')
     elements = []
-    
-    # 제목 추출
-    title = soup.find(['h1', 'h2', 'h3'])
-    if title:
-        elements.append(('title', get_text_content(title)))
-    
-    # 본문 내용 추출
-    for element in soup.find_all(['p', 'div', 'table']):
+
+    body = soup.body or soup  # body가 없으면 전체 soup로 대체
+
+    for element in body.descendants:
+        # 태그가 아닌 경우 스킵
+        if not hasattr(element, 'name'):
+            continue
+
+        # 중복 방지: 이미 처리한 table 내부의 td, tr 등은 건너뜀
+        if element.name not in ['p', 'div', 'table']:
+            continue
+
+        # 중복 방지용
+        if any(parent.name == 'table' for parent in element.parents if parent != element):
+            continue
+
         if element.name == 'table':
             elements.append(('table', process_table(element)))
         else:
             text = get_text_content(element)
             if text:
                 elements.append(('text', text))
-    
+
     return elements
 
 def save_files(html_content, rag_text, filename_prefix):
@@ -122,13 +150,18 @@ def save_files(html_content, rag_text, filename_prefix):
             elif elem_type == 'text':
                 f.write(f"{content}\n\n")
 
+def count_tokens(text, encoding_name='cl100k_base'):
+    encoding = tiktoken.get_encoding(encoding_name)
+    return len(encoding.encode(text))
+
+
 def main():
     # 출력 디렉토리 초기화
     cleanup_output()
     
     # Parquet 파일 읽기
     df = pd.read_parquet("./kms/kms.parquet_20241102.snappy")
-    
+    total_tokens = 0
     # 각 문서 처리
     for idx in range(len(df)):
         print(f"\n처리 중: 문서 {idx+1}")
@@ -136,6 +169,9 @@ def main():
         
         # RAG 텍스트로 변환
         rag_text = html_to_rag_text(html_content)
+
+        for elem_type, content in rag_text:
+            total_tokens += count_tokens(content)
         
         # 파일 저장
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -148,5 +184,6 @@ def main():
         # HTML 파일 브라우저로 열기
         webbrowser.open(f'file://{os.path.abspath(f"output/{filename_prefix}_original.html")}')
 
+    print(f"\n전체 문서의 총 토큰 수: {total_tokens}")
 if __name__ == "__main__":
     main()
